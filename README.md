@@ -18,8 +18,14 @@ This system provides movie recommendations based on user preferences using sever
    - Genre-based: Recommends movies with similar genres to favorites
    - Title-based: Uses text similarity of movie titles
 
-4. **Hybrid Recommendation**
+4. **BERT-Based Analysis** (NEW!)
+   - Uses transformer models to understand movie descriptions
+   - Identifies themes and sentiment in movie content
+   - Provides content-aware recommendations based on semantic understanding
+
+5. **Hybrid Recommendation**
    - Combines collaborative filtering, matrix factorization, and content-based approaches
+   - Integrates BERT-based semantic understanding
    - Provides explanations for recommendations
 
 ## Project Structure
@@ -43,10 +49,13 @@ MovieGen/
 │   │   ├── collaborative_filtering.py  # User/Item-based CF
 │   │   ├── matrix_factorization.py     # ALS and SGD
 │   │   ├── content_based.py            # Content-based filtering
+│   │   ├── bert_recommender.py         # BERT-based recommendations
+│   │   ├── text_analysis.py            # Text analysis with transformers
 │   │   └── hybrid_recommender.py       # Combined approach
 │   ├── evaluation/           # Evaluation metrics and tools
 │   │   └── evaluator.py      # Precision, recall, diversity metrics
 │   ├── demo.py               # Interactive demo application
+│   ├── bert_demo.py          # BERT-specific demo application
 │   └── run_comparison.py     # Compare recommender performance
 └── requirements.txt          # Project dependencies
 ```
@@ -82,20 +91,34 @@ MovieGen/
 Run the interactive command-line demo to get movie recommendations:
 
 ```
-python src/demo.py --interactive
+python -m src.demo --interactive
 ```
 
 Or get recommendations for a specific user:
 
 ```
-python src/demo.py --user 42 --algorithm hybrid --recommendations 10 --explain
+python -m src.demo --user 42 --algorithm hybrid --recommendations 10 --explain
 ```
 
-Command-line options:
+### BERT-Based Demo (NEW!)
+
+To explore the BERT-based recommendation capabilities:
+
+```
+python -m src.bert_demo --interactive
+```
+
+This demo allows you to:
+- Analyze movies using BERT to extract themes and semantics
+- Get BERT-based recommendations for users
+- Compare BERT recommendations with hybrid approach
+
+Command-line options for BERT demo:
 - `--user`: User ID to generate recommendations for
-- `--algorithm`: Recommendation algorithm to use (itemcf, usercf, als, content, hybrid)
-- `--recommendations`: Number of recommendations to generate (default: 10)
-- `--explain`: Show explanation for recommendations (only for hybrid)
+- `--movie`: Movie ID to analyze with BERT
+- `--recommendations`: Number of recommendations to generate
+- `--compare`: Compare BERT with hybrid recommendations
+- `--model`: Specify BERT model to use (default: distilbert-base-uncased)
 - `--interactive`: Run in interactive mode
 
 ### Evaluate and Compare Models
@@ -103,7 +126,7 @@ Command-line options:
 Run a comparison of all recommendation models:
 
 ```
-python src/run_comparison.py
+python -m src.run_comparison
 ```
 
 This will:
@@ -131,14 +154,22 @@ This will:
 - **Title-based Recommender**: Uses text similarity between movie titles to find similar movies.
 - **Hybrid Content Recommender**: Combines genre and title similarity with configurable weights.
 
+### BERT-Based Analysis and Recommendation (NEW!)
+
+- **Transformer-Based Text Understanding**: Uses BERT to generate embeddings that capture semantic meaning of movie descriptions.
+- **Theme Extraction**: Identifies common themes and topics across the movie catalog.
+- **Sentiment Analysis**: Detects the emotional tone of movie descriptions.
+- **Semantic Similarity**: Recommends movies with similar themes and content, not just matching genre labels.
+
 ### Hybrid Recommender
 
 The hybrid recommender combines:
 - Item-based collaborative filtering
 - Matrix factorization (ALS)
 - Content-based filtering
+- BERT-based semantic analysis
 
-It provides explanations for why a movie was recommended, such as similar genres to movies you've enjoyed or similarity to movies you've rated highly.
+It provides explanations for why a movie was recommended, such as similar genres to movies you've enjoyed, similarity to movies you've rated highly, or matching themes detected through semantic analysis.
 
 ## Evaluation Metrics
 

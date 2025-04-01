@@ -12,6 +12,7 @@ import time
 from src.models.collaborative_filtering import ItemBasedCF, UserBasedCF
 from src.models.matrix_factorization import ALS, SGD
 from src.models.content_based import GenreBasedRecommender, TitleBasedRecommender, HybridContentRecommender
+from src.models.bert_recommender import BERTContentRecommender, get_bert_recommendation_explanation
 
 # Configure logging
 logging.basicConfig(
@@ -26,16 +27,20 @@ class HybridRecommender:
     - Item-based collaborative filtering
     - Matrix factorization
     - Content-based filtering
+    - BERT-based text analysis (optional)
     """
     
     def __init__(
         self,
-        item_cf_weight: float = 0.35,
-        mf_weight: float = 0.35,
-        content_weight: float = 0.3,
+        item_cf_weight: float = 0.30,
+        mf_weight: float = 0.25,
+        content_weight: float = 0.20,
+        bert_weight: float = 0.25,
+        use_bert: bool = True,
         n_factors: int = 50,
         item_cf_min_support: int = 3,
-        item_cf_k_neighbors: int = 30
+        item_cf_k_neighbors: int = 30,
+        bert_model_name: str = "distilbert-base-uncased"
     ):
         """
         Initialize hybrid recommender.
@@ -44,13 +49,25 @@ class HybridRecommender:
             item_cf_weight: Weight for item-based collaborative filtering
             mf_weight: Weight for matrix factorization
             content_weight: Weight for content-based recommendations
+            bert_weight: Weight for BERT-based recommendations
+            use_bert: Whether to use BERT-based recommendations
             n_factors: Number of latent factors for matrix factorization
             item_cf_min_support: Minimum number of common users for item similarity
             item_cf_k_neighbors: Number of neighbors for item-based CF
+            bert_model_name: Name of the BERT model to use
         """
         self.item_cf_weight = item_cf_weight
         self.mf_weight = mf_weight
         self.content_weight = content_weight
+        self.bert_weight = bert_weight if use_bert else 0.0
+        self.use_bert = use_bert
+        
+        # If not using BERT, redistribute weights
+        if not use_bert:
+            total = self.item_cf_weight + self.mf_weight + self.content_weight
+            self.item_cf_weight = self.item_cf_weight / total
+            self.mf_weight = self.mf_weight / total
+            self.content_weight = self.content_weight / total
         
         # Initialize component recommenders
         self.item_cf = ItemBasedCF(
@@ -70,6 +87,13 @@ class HybridRecommender:
             title_weight=0.3
         )
         
+        # Initialize BERT recommender if requested
+        self.bert_recommender = None
+        if use_bert:
+            self.bert_recommender = BERTContentRecommender(
+                bert_model_name=bert_model_name
+            )
+        
         # Dataset-related attributes
         self.rating_matrix = None
         self.train_matrix = None
@@ -79,7 +103,8 @@ class HybridRecommender:
         self.movie_to_idx = None
         
         logger.info(f"Initialized HybridRecommender with weights: "
-                   f"Item-CF={item_cf_weight}, MF={mf_weight}, Content={content_weight}")
+                   f"Item-CF={item_cf_weight}, MF={mf_weight}, "
+                   f"Content={content_weight}, BERT={bert_weight}")
     
     def fit(
         self,
@@ -137,6 +162,26 @@ class HybridRecommender:
         logger.info("Fitting content-based recommender")
         self.content_recommender.fit(movies_df, movie_genres_df)
         
+        # Fit BERT recommender if enabled
+        if self.use_bert and self.bert_recommender:
+            logger.info("Fitting BERT-based recommender")
+            
+            # Create a description field combining title and genres if needed
+            if 'description' not in movies_df.columns:
+                movies_df = movies_df.copy()
+                movies_df['description'] = movies_df.apply(
+                    lambda row: f"{row['title']} is a movie. " + 
+                               f"Genres: {', '.join(row['genres'])}" 
+                               if isinstance(row.get('genres'), list) else row['title'],
+                    axis=1
+                )
+            
+            self.bert_recommender.fit(
+                movies_df,
+                description_col='description',
+                force_recompute=False
+            )
+        
         logger.info("Hybrid recommender fitted")
         return self
     
@@ -172,7 +217,8 @@ class HybridRecommender:
         exclude_rated: bool = True,
         use_item_cf: bool = True,
         use_mf: bool = True,
-        use_content: bool = True
+        use_content: bool = True,
+        use_bert: bool = True
     ) -> List[Tuple[int, float]]:
         """
         Generate recommendations for a user.
@@ -184,6 +230,7 @@ class HybridRecommender:
             use_item_cf: Whether to use item-based CF
             use_mf: Whether to use matrix factorization
             use_content: Whether to use content-based filtering
+            use_bert: Whether to use BERT-based recommendations
             
         Returns:
             List[Tuple[int, float]]: List of (movie_id, predicted_rating) tuples
@@ -204,6 +251,7 @@ class HybridRecommender:
         item_cf_recs = []
         mf_recs = []
         content_recs = []
+        bert_recs = []
         
         if use_item_cf:
             logger.info(f"Getting item-based CF recommendations for user {user_id}")
@@ -226,6 +274,14 @@ class HybridRecommender:
             logger.info(f"Getting content-based recommendations for user {user_id}")
             content_recs = self.content_recommender.recommend_for_user(
                 user_rated_movies, 
+                n_recommendations=n_candidates,
+                exclude_rated=exclude_rated
+            )
+        
+        if use_bert and self.use_bert and self.bert_recommender:
+            logger.info(f"Getting BERT-based recommendations for user {user_id}")
+            bert_recs = self.bert_recommender.recommend_for_user(
+                user_rated_movies,
                 n_recommendations=n_candidates,
                 exclude_rated=exclude_rated
             )
@@ -258,6 +314,14 @@ class HybridRecommender:
                 movie_scores[movie_id] += self.content_weight * similarity
             else:
                 movie_scores[movie_id] = self.content_weight * similarity
+        
+        # Add BERT-based recommendations
+        for movie_id, similarity in bert_recs:
+            # BERT similarity is already normalized
+            if movie_id in movie_scores:
+                movie_scores[movie_id] += self.bert_weight * similarity
+            else:
+                movie_scores[movie_id] = self.bert_weight * similarity
         
         # Sort by score
         sorted_recommendations = sorted(
@@ -368,6 +432,14 @@ class HybridRecommender:
             "explanation": "This movie has genres you've enjoyed in the past"
         }
         
+        # Add BERT-based explanation if available
+        if self.use_bert and self.bert_recommender:
+            bert_explanation = self.bert_recommender.explain_recommendation(
+                movie_id, 
+                user_rated_movies
+            )
+            explanation["components"]["bert"] = bert_explanation
+        
         return explanation
 
 def get_recommendation_explanation(
@@ -425,6 +497,22 @@ def get_recommendation_explanation(
             for _, title, rating, sim in item_cf_exp["similar_movies"][:3]:
                 text += f"  - '{title}' (you rated {rating:.1f}/5)\n"
     
+    # Add BERT-based explanation
+    if "bert" in explanation["components"]:
+        bert_exp = explanation["components"]["bert"]
+        
+        # Add themes explanation
+        if bert_exp.get("themes"):
+            text += "• It has themes that match your preferences:\n"
+            for theme, score in bert_exp["themes"][:2]:
+                theme_name = theme.split(":")[0].strip() if ":" in theme else theme
+                text += f"  - {theme_name}\n"
+        
+        # Add sentiment explanation
+        if bert_exp.get("sentiment") is not None:
+            sentiment_str = "positive" if bert_exp["sentiment"] > 0.6 else "balanced"
+            text += f"• It has a {sentiment_str} tone similar to movies you've enjoyed\n"
+    
     return text
 
 if __name__ == "__main__":
@@ -454,9 +542,12 @@ if __name__ == "__main__":
         item_cf_weight=0.4,
         mf_weight=0.3,
         content_weight=0.3,
+        bert_weight=0.25,
+        use_bert=True,
         n_factors=50,
         item_cf_min_support=3,
-        item_cf_k_neighbors=30
+        item_cf_k_neighbors=30,
+        bert_model_name="distilbert-base-uncased"
     )
     
     recommender.fit(
